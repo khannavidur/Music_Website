@@ -1,12 +1,21 @@
+/* jshint multistr : true, node : true */
 "use strict";
 
 var 
-	HTTP 			 = require("http"),
-	XMLPARSER        = require('xml2json'),
-	billboardURL     = "http://www.billboard.com/rss/charts/hot-100",
-	_                = require('lodash'),
-	L 				 = null,
-	XML2JSON_OPTS    = {
+    /* NODE INTERNAL */
+    HTTP                = require('http'),
+    UTIL                = require('util'),
+
+    /* NPM THIRD PARTY */
+    XMLPARSER           = require('xml2json'),
+    _                   = require('lodash'),
+
+    /* PROJECT INTERNALS */
+    L                   = require('../Logger/index.js'),
+    CONFIG              = require('../config.js'),
+
+    /* GLOBAL */
+    XML2JSON_OPTS       = {
         object          : true,
         reversible      : false,
         coerce          : false,
@@ -16,75 +25,88 @@ var
     };
 
 
-function me(opts){
-	var self = this;
-    self.L   = (opts.L) ? opts.L : require('../Logger/index.js');
-    self._L  = self.L;
-    L        = self.L;
+function me(){
+    var
+        self = this;
+
+    self.CONFIG             = CONFIG;
+    self.data               = '';
+    self.billBoardTop100    = [];
 }
 
 /*
-* curl -i -XGET "http://www.billboard.com/rss/charts/hot-100"
+* curl -i -XGET 'http://www.billboard.com/rss/charts/hot-100'
 */
 
-me.prototype._callingRSS = function(callback){
-	var dataToBeSent ='';
-	HTTP.get(billboardURL,function(response){
-		
-		//data comes in buffer
-		response.on('data',function(data){
-			dataToBeSent = dataToBeSent + data.toString();						
-		});
+me.prototype.start = function(cb){
+    var
+        self = this;
 
-		//
-		response.on('end',function(){
+    L.log('start','Begin Fetch data from BillBoard  RSS Feed');
 
-			try{
-				dataToBeSent = XMLPARSER.toJson(dataToBeSent,XML2JSON_OPTS);
-			} catch(error){
-				//console.log("error" +error);
-			}
-          
-			/*	
-			*  FORMAT OF JSON
-			*	{ rss: 
-			*	   [ { version: '2.0',
-			*	       'xml:base': 'http://www.billboard.com/charts/hot-100',
-			*	       'xmlns:dc': 'http://purl.org/dc/elements/1.1/',
-			*	       'xmlns:c': 'http://s.opencalais.com/1/pred/',
-			*	       'xmlns:sys': 'http://s.opencalais.com/1/type/sys/',
-			*	       'xmlns:lid': 'http://s.opencalais.com/1/type/lid/',
-			*	       'xmlns:cat': 'http://s.opencalais.com/1/type/cat/',
-			*	       'xmlns:resolved': 'http://s.opencalais.com/1/type/er/',
-			*	       'xmlns:cgeo': 'http://s.opencalais.com/1/type/er/Geo/',
-			*	       'xmlns:eventfact': 'http://s.opencalais.com/1/type/em/r/',
-			*	       'xmlns:entity': 'http://s.opencalais.com/1/type/em/e/',
-			*	       'xmlns:cld': 'http://s.opencalais.com/1/linkeddata/pred/',
-			*	       'xmlns:content': 'http://purl.org/rss/1.0/modules/content/',
-			*	       'xmlns:foaf': 'http://xmlns.com/foaf/0.1/',
-			*	       'xmlns:og': 'http://ogp.me/ns#',
-			*	       'xmlns:rdfs': 'http://www.w3.org/2000/01/rdf-schema#',
-			*	       'xmlns:sioc': 'http://rdfs.org/sioc/ns#',
-			*	       'xmlns:sioct': 'http://rdfs.org/sioc/types#',
-			*	       'xmlns:skos': 'http://www.w3.org/2004/02/skos/core#',
-			*	       'xmlns:xsd': 'http://www.w3.org/2001/XMLSchema#',
-			*	       channel: [Object] } ] }
-			*
-			*		required data at  :- channel[0].item[0-99]
-			*
-			*/
+    self._callingRSS(function(error){
+        if(error){
+            return cb(error,null);
+        }else{
+            L.log('start','formatting data to send');
+            self.data.forEach(function(data){
+                var object = {
+                    title               : _.get(data,'chart_item_title.0',''),
+                    artist              : _.get(data,'artist.0',''),
+                    rank_this_week      : _.get(data,'rank_this_week.0',''),
+                    rank_last_week      : _.get(data,'rank_last_week.0',''),
+                };
 
-			//L.log("response",_.get(dataToBeSent,"rss.0.channel.0.item",null)); //to log response from rss feed
-		    return callback(_.get(dataToBeSent,"rss.0.channel.0.item",null));
-		})
-
-		
-
-		
-			 
+                self.billBoardTop100.push(object);
+            });
+            return cb(null,self.billBoardTop100);
+        }
     });
 };
 
+me.prototype._callingRSS = function(callback){
+    var
+        self                = this,
+        billboardURL        = _.get(self,'CONFIG.BILL_BOARD_TOP_100_API_URL','');
+
+    L.log('_callingRSS','trying to hit bill board rss API');
+        
+    HTTP.get(billboardURL,function(response){
+
+        //data comes in buffer
+        response.on('data',function(data){
+            L.log('_callingRSS','receiving data');
+            self.data += data.toString();
+        });
+
+
+        //completely received data
+        response.on('end',function(){
+            L.log('_callingRSS','data received');            
+            try{
+                self.data = XMLPARSER.toJson(self.data,XML2JSON_OPTS);
+                self.data = _.get(self,'data.rss.0.channel.0.item',[]);
+                return callback();
+            } catch(error){
+                L.error('_callingRSS','Parsing error : ',error);
+                return callback(error);
+            }
+        });
+
+    });
+};
+
+/*
+    FLOW :
+        - Make a http get request to the rss feed url
+        - Data comes as a buffer to make it to string and append it to a global var
+        - when data completely received its in xml so we parse it as json
+        - process the json data and format it into an array of objects
+        - Each object in the array contains the following
+            title
+            artist
+            rank_this_week
+            rank_last_week
+*/
 
 module.exports =  me;
-

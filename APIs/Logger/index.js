@@ -1,83 +1,24 @@
-/*jshint multistr: true ,node: true*/
 "use strict";
 
 var
+	L 			= require('logger'),
+	logger 		= function(){
 
-    UTIL                = require('util'),
+		/*
+			Adding all the level options
+		*/
+		L.addLevel('verbos',1000,{fg:'blue'},'VERBOS');
+		L.addLevel('info',2000,{fg:'yellow'},'INFO');
+	    L.addLevel('log',3000,{fg:'magenta'},'LOG');
+	    L.addLevel('error',4000,{fg:'red'},'ERROR');
+	    L.addLevel('critical',5000,{fg:'red',bg:'yellow'},'CRITICAL');
 
-    /* NPM Third Party */
-    _                   = require('lodash'),
-    NPMLOG              = require('npmlog'),
-    MOMENT              = require('moment');
-    
-    /* NPM Paytm */
-    
-    /* Project Files */
+	    /*
+			Setting default level
+	    */
+	    L.setLevel("info");
 
-function LGR(opts) {
-    this.NPMLOG = NPMLOG;
+	    return L;
+	};
 
-    /*
-        maintain internal count
-    */
-    this.count = 0;
-
-    /*
-        Log format
-        "ram" , "ts" "uptime" "pid"
-    */
-    this.setLogFormat('<%= ts %> [<%= uptime %>] [<%= count %>] ');
-
-    /*
-        npmlog emits log and log.<lvl> event after that
-        Hence we put a hook in both the events and change the stream before the log is written
-        Since events are sync, this sohuld not be a problem
-    */
-    NPMLOG.on('log', function(obj){
-        this.count++;
-        NPMLOG.stream = process.stdout;
-    }.bind(this));
-
-    NPMLOG.on('log.error', function(obj){
-        NPMLOG.stream = process.stderr;
-        /* STDOUT will not get a copy of this erro rmessage */
-    }.bind(this));
-
-
-}
-
-// Override ALL LEVELS ... to have timestamp
-Object.keys(NPMLOG.levels).forEach(function(k){
-    LGR.prototype[k] = function(){
-        arguments[0] = this._p() + arguments[0];
-        return this.NPMLOG[k].apply(this, arguments);
-    };
-});
-
-LGR.prototype.log = function(){
-    arguments[0] = this._p() + arguments[0];
-    return this.NPMLOG['info'].apply(this, arguments);
-};
-
-/* Sets log format for a user */
-LGR.prototype.setLogFormat = function(val){
-    this.logFormat =  _.template(val);
-};
-
-/* returns log prefix */
-LGR.prototype._p = function(){
-    return this.logFormat({
-        "ram"       :  JSON.stringify(process.memoryUsage()),
-        "ts"        :  MOMENT().format("YYYY-MM-DD HH:mm:ss"),
-        "uptime"    : process.uptime(),
-        "pid"       : process.pid,
-        "count"     : this.count,
-    });
-};
-
-LGR.prototype.setLevel = function(level){
-    this.level = level;
-    this.NPMLOG.level = level;
-};
-
-module.exports = new LGR();
+module.exports = logger();
